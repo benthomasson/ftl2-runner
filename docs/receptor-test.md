@@ -204,13 +204,28 @@ The warning about version mismatch is usually safe to ignore for basic testing.
 ### Socket permission denied
 The socket is created with user-only permissions. Make sure you're running receptorctl as the same user that started Receptor.
 
-## Automated Test
+## Automated Tests
 
-For CI/automated testing, use the pytest test instead:
+### Unit Test (no Receptor required)
 
 ```bash
 cd /Users/ben/git/ftl2-runner
 uv run pytest tests/test_worker_streaming.py -v
 ```
 
-This runs the same streaming protocol test without requiring Receptor.
+This tests the streaming protocol directly without Receptor.
+
+### Integration Test (requires Receptor)
+
+```bash
+cd /Users/ben/git/ftl2-runner
+uv run pytest tests/test_receptor_integration.py -v
+```
+
+This runs the full end-to-end test with Receptor. The test will be skipped if Receptor is not installed.
+
+### All Tests
+
+```bash
+uv run pytest tests/ -v
+```
