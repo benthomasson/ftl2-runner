@@ -41,32 +41,15 @@ localhost ansible_connection=local
 
 
 def create_test_ftl2_script(script_path: Path) -> None:
-    """Create a simple test FTL2 script."""
+    """Create a simple test FTL2 script using new RunnerContext interface."""
     script = '''
 """Test FTL2 script for worker testing."""
 
-async def run(inventory_path, extravars, on_event):
-    """Simple test that emits a few events."""
-    # Emit start event
-    on_event({
-        "event": "module_start",
-        "module": "test_module",
-        "host": "localhost",
-    })
-
-    # Emit success event
-    on_event({
-        "event": "module_complete",
-        "module": "test_module",
-        "host": "localhost",
-        "success": True,
-        "changed": False,
-        "result": {
-            "msg": f"Test passed! extravars={extravars}",
-            "inventory_path": inventory_path,
-        },
-    })
-
+async def run(inventory_path, extravars, runner):
+    """Simple test using automatic event streaming."""
+    # Events are emitted automatically by FTL2 automation context
+    async with runner.automation() as ftl:
+        await ftl.ping()
     return 0
 '''
     script_path.parent.mkdir(parents=True, exist_ok=True)

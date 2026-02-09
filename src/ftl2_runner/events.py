@@ -71,7 +71,8 @@ class EventTranslator:
                 "host": ftl2_event.get("host", "localhost"),
                 "task": ftl2_event.get("module", "unknown"),
                 "task_action": ftl2_event.get("module", "unknown"),
-                "res": ftl2_event.get("result", {}),
+                # FTL2 uses 'output', fallback to 'result' for backward compatibility
+                "res": ftl2_event.get("output") or ftl2_event.get("result", {}),
                 "changed": ftl2_event.get("changed", False),
             }
             if "duration" in ftl2_event:

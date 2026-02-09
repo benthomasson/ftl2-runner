@@ -22,6 +22,7 @@ from ftl2_runner.events import (
     create_playbook_stats_event,
     create_status_event,
 )
+from ftl2_runner.runner_context import RunnerContext
 from ftl2_runner.streaming import (
     read_input_stream,
     stream_dir,
@@ -130,7 +131,7 @@ async def execute_script(
     script_path: str,
     inventory_path: str | None,
     extravars: dict[str, Any],
-    on_event: Callable[[dict[str, Any]], None],
+    runner: RunnerContext,
 ) -> int:
     """Execute the baked-in FTL2 script.
 
@@ -138,7 +139,7 @@ async def execute_script(
         script_path: Path to Python script
         inventory_path: Path to inventory directory
         extravars: Extra variables dict
-        on_event: Event callback
+        runner: RunnerContext for automatic event streaming
 
     Returns:
         Exit code (0 = success)
@@ -147,12 +148,12 @@ async def execute_script(
 
     if run_func is None:
         # No script found - emit a simple success event
-        on_event({
+        runner.emit_event({
             "event": "module_start",
             "module": "ftl2_runner",
             "host": "localhost",
         })
-        on_event({
+        runner.emit_event({
             "event": "module_complete",
             "module": "ftl2_runner",
             "host": "localhost",
@@ -162,10 +163,13 @@ async def execute_script(
         return 0
 
     try:
-        result = await run_func(inventory_path, extravars, on_event)
+        # Pass runner to script - scripts can use runner.automation()
+        # for automatic event streaming, or call runner.emit_event()
+        # for manual events (backward compatible)
+        result = await run_func(inventory_path, extravars, runner)
         return result if isinstance(result, int) else 0
     except Exception as e:
-        on_event({
+        runner.emit_event({
             "event": "module_complete",
             "module": "ftl2_runner",
             "host": "localhost",
@@ -215,10 +219,7 @@ def run_worker(
     # Send starting status
     write_status(stdout, "starting")
 
-    # Create event translator
-    collected_events: list[dict[str, Any]] = []
-    stats: dict[str, dict[str, int]] = {}
-
+    # Create event callback that writes to stdout and artifacts
     def on_translated_event(event: dict[str, Any]) -> None:
         """Handle translated event."""
         # Write to stdout for streaming
@@ -227,23 +228,8 @@ def run_worker(
         # Write to artifact file
         artifact_writer.write_event(event)
 
-        # Collect for stats
-        collected_events.append(event)
-
-        # Update stats
-        host = event.get("event_data", {}).get("host", "localhost")
-        if host not in stats:
-            stats[host] = {"ok": 0, "changed": 0, "failed": 0, "skipped": 0}
-
-        event_type = event.get("event")
-        if event_type == "runner_on_ok":
-            stats[host]["ok"] += 1
-            if event.get("event_data", {}).get("changed"):
-                stats[host]["changed"] += 1
-        elif event_type == "runner_on_failed":
-            stats[host]["failed"] += 1
-
-    translator = EventTranslator(ident, on_event=on_translated_event)
+    # Create runner context for automatic event streaming
+    runner = RunnerContext(ident, on_event=on_translated_event, stream=stdout)
 
     # Load inventory and extravars
     inventory_path = get_inventory_path(private_data_dir)
@@ -255,7 +241,7 @@ def run_worker(
     # Execute the script
     try:
         rc = asyncio.run(
-            execute_script(script_path, inventory_path, extravars, translator)
+            execute_script(script_path, inventory_path, extravars, runner)
         )
     except Exception as e:
         # Error during execution
@@ -271,8 +257,8 @@ def run_worker(
     else:
         status = "failed"
 
-    # Write stats event
-    stats_event = create_playbook_stats_event(ident, next_counter(), stats)
+    # Write stats event (RunnerContext tracks stats from FTL2 events)
+    stats_event = create_playbook_stats_event(ident, next_counter(), runner._stats)
     write_event(stdout, stats_event)
     artifact_writer.write_event(stats_event)
 

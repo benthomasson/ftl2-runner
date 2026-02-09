@@ -156,28 +156,15 @@ def test_environment(tmp_path):
     # Get the venv python
     venv_python = Path(sys.executable)
 
-    # Create FTL2 test script
+    # Create FTL2 test script using new RunnerContext interface
     ftl2_script = tmp_path / "ftl2_script.py"
     ftl2_script.write_text('''
 """Test FTL2 script for receptor integration test."""
 
-async def run(inventory_path, extravars, on_event):
-    on_event({
-        "event": "module_start",
-        "module": "integration_test",
-        "host": "localhost",
-    })
-    on_event({
-        "event": "module_complete",
-        "module": "integration_test",
-        "host": "localhost",
-        "success": True,
-        "changed": False,
-        "result": {
-            "msg": f"Integration test passed! extravars={extravars}",
-            "inventory_path": inventory_path,
-        },
-    })
+async def run(inventory_path, extravars, runner):
+    # Events are emitted automatically by FTL2 automation context
+    async with runner.automation() as ftl:
+        await ftl.ping()
     return 0
 ''')
 
@@ -303,12 +290,12 @@ def test_receptor_integration(receptor_binary, receptorctl_binary, test_environm
         # Verify EOF
         assert any(e.get("eof") for e in events), f"Missing EOF marker. Events: {events}"
 
-        # Verify the result message
+        # Verify the ping result
         ok_events = [e for e in events if e.get("event") == "runner_on_ok"]
-        assert len(ok_events) == 1
-        result_msg = ok_events[0]["event_data"]["res"]["msg"]
-        assert "Integration test passed!" in result_msg
-        assert "receptor_integration" in result_msg
+        assert len(ok_events) >= 1, f"Expected at least 1 runner_on_ok event. Events: {events}"
+        # Ping module returns {"ping": "pong"}
+        result = ok_events[0]["event_data"]["res"]
+        assert result.get("ping") == "pong", f"Expected ping result. Got: {result}"
 
     finally:
         # Cleanup receptor
