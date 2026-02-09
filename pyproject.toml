@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 dependencies = [
-    "ftl2",
+    "ftl2 @ git+https://github.com/benthomasson/ftl2",
     "pyyaml",
 ]
 
@@ -34,6 +34,9 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
 ]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ftl2_runner"]
