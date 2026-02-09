@@ -1,0 +1,40 @@
+graph TB
+    subgraph "AWX / Controller"
+        AWX[AWX Controller]
+    end
+
+    subgraph "ftl2-runner Package"
+        IF[interface.py<br/>run, run_async, init_runner]
+        RC[config.py<br/>FTL2RunnerConfig]
+        RN[runner.py<br/>FTL2Runner]
+        EV[events.py<br/>EventTranslator]
+        AR[artifacts.py<br/>ArtifactWriter]
+        IA[inventory_adapter.py<br/>InventoryAdapter]
+    end
+
+    subgraph "FTL2 Engine"
+        AUTO[automation context]
+        EXEC[ModuleExecutor]
+        GATE[Gate System]
+    end
+
+    subgraph "Artifacts"
+        JE[job_events/*.json]
+        SO[stdout]
+        SE[stderr]
+        ST[status, rc]
+    end
+
+    AWX -->|"run(module='ping', ...)"| IF
+    IF --> RC
+    IF --> RN
+    RC --> IA
+    RN -->|"asyncio.run()"| AUTO
+    AUTO --> EXEC
+    EXEC --> GATE
+    RN --> EV
+    EV --> AR
+    AR --> JE
+    AR --> SO
+    AR --> SE
+    AR --> ST

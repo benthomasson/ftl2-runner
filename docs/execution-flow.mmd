@@ -1,0 +1,30 @@
+sequenceDiagram
+    participant AWX as AWX
+    participant IF as interface.py
+    participant RN as FTL2Runner
+    participant FTL as FTL2 automation()
+    participant AR as ArtifactWriter
+
+    AWX->>IF: run(module="ping", host_pattern="all")
+    IF->>RN: FTL2Runner(config)
+    IF->>RN: runner.run()
+
+    RN->>RN: status_callback("starting")
+    RN->>AR: create artifact dirs
+
+    RN->>FTL: asyncio.run(_run_async())
+
+    loop For each host
+        FTL->>RN: on_event(module_start)
+        RN->>AR: write job_events/N-uuid.json
+        FTL->>FTL: execute module
+        FTL->>RN: on_event(module_complete)
+        RN->>AR: write job_events/N-uuid.json
+    end
+
+    FTL-->>RN: execution complete
+    RN->>RN: status_callback("successful")
+    RN->>AR: write rc, status
+    RN->>AWX: finished_callback(runner)
+    RN-->>IF: return runner
+    IF-->>AWX: return runner
