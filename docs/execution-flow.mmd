@@ -1,30 +1,27 @@
 sequenceDiagram
-    participant AWX as AWX
-    participant IF as interface.py
-    participant RN as FTL2Runner
-    participant FTL as FTL2 automation()
-    participant AR as ArtifactWriter
+    participant AWX as AWX Controller
+    participant RX as Receptor
+    participant WK as ftl2-runner worker
+    participant FTL as main.py
 
-    AWX->>IF: run(module="ping", host_pattern="all")
-    IF->>RN: FTL2Runner(config)
-    IF->>RN: runner.run()
+    AWX->>RX: transmit private_data_dir
+    RX->>WK: unpack to runner dir
 
-    RN->>RN: status_callback("starting")
-    RN->>AR: create artifact dirs
+    WK->>WK: Load inventory
+    WK->>WK: Load extravars
+    WK->>WK: Ignore playbook
 
-    RN->>FTL: asyncio.run(_run_async())
+    WK->>FTL: Execute with inventory + vars
 
-    loop For each host
-        FTL->>RN: on_event(module_start)
-        RN->>AR: write job_events/N-uuid.json
+    loop FTL2 execution
+        FTL->>WK: on_event module_start
+        WK->>RX: stream event runner_on_start
         FTL->>FTL: execute module
-        FTL->>RN: on_event(module_complete)
-        RN->>AR: write job_events/N-uuid.json
+        FTL->>WK: on_event module_complete
+        WK->>RX: stream event runner_on_ok
     end
 
-    FTL-->>RN: execution complete
-    RN->>RN: status_callback("successful")
-    RN->>AR: write rc, status
-    RN->>AWX: finished_callback(runner)
-    RN-->>IF: return runner
-    IF-->>AWX: return runner
+    FTL-->>WK: execution complete
+    WK->>WK: write artifacts
+    WK->>RX: stream final events
+    RX->>AWX: process results

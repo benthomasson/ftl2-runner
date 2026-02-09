@@ -1,233 +1,262 @@
 # FTL2-Runner: ansible-runner Compatibility Layer
 
-A drop-in replacement for ansible-runner that uses FTL2 as the execution backend, enabling AWX to leverage FTL2's 3-17x performance improvement without code changes.
+A drop-in replacement for ansible-runner's worker mode that runs a baked-in FTL2 script inside AWX execution environments.
+
+## Overview
+
+Instead of translating ansible-runner API calls to FTL2, this package:
+
+1. **Implements ansible-runner's worker CLI** - `ftl2-runner worker --private-data-dir=/runner`
+2. **Ignores playbooks/tasks from AWX** - We don't execute what AWX sends
+3. **Runs a baked-in FTL2 script** - Pre-built automation at `/opt/ftl2/main.py`
+4. **Passes through inventory and extra_vars** - From AWX's private_data_dir
+5. **Emits ansible-runner format events** - So AWX can track progress
 
 ## Architecture
 
 ```mermaid
 graph TB
-    subgraph "AWX / Controller"
+    subgraph "AWX Controller"
         AWX[AWX Controller]
+        TX[Transmit Phase]
+        PX[Process Phase]
     end
 
-    subgraph "ftl2-runner Package"
-        IF[interface.py<br/>run, run_async, init_runner]
-        RC[config.py<br/>FTL2RunnerConfig]
-        RN[runner.py<br/>FTL2Runner]
-        EV[events.py<br/>EventTranslator]
-        AR[artifacts.py<br/>ArtifactWriter]
-        IA[inventory_adapter.py<br/>InventoryAdapter]
+    subgraph "Receptor Network"
+        RX[Receptor]
     end
 
-    subgraph "FTL2 Engine"
-        AUTO[automation context]
-        EXEC[ModuleExecutor]
-        GATE[Gate System]
+    subgraph "Execution Environment Container"
+        WK[ftl2-runner worker]
+
+        subgraph "Private Data Dir /runner"
+            INV[inventory/]
+            ENV[env/extravars]
+            PB[project/playbook.yml<br/>IGNORED]
+        end
+
+        subgraph "Baked-in Script"
+            FTL[/opt/ftl2/main.py]
+        end
+
+        subgraph "FTL2 Engine"
+            AUTO[automation context]
+            EXEC[ModuleExecutor]
+        end
+
+        ART[artifacts/]
     end
 
-    subgraph "Artifacts"
-        JE[job_events/*.json]
-        SO[stdout]
-        SE[stderr]
-        ST[status, rc]
-    end
-
-    AWX -->|"run(module='ping', ...)"| IF
-    IF --> RC
-    IF --> RN
-    RC --> IA
-    RN -->|"asyncio.run()"| AUTO
+    AWX --> TX
+    TX -->|stream private_data_dir| RX
+    RX -->|unpack| WK
+    WK -->|read| INV
+    WK -->|read| ENV
+    WK -->|execute| FTL
+    FTL --> AUTO
     AUTO --> EXEC
-    EXEC --> GATE
-    RN --> EV
-    EV --> AR
-    AR --> JE
-    AR --> SO
-    AR --> SE
-    AR --> ST
+    EXEC -->|results| ART
+    WK -->|stream events| RX
+    RX --> PX
+    PX --> AWX
 ```
 
 ## Execution Flow
 
 ```mermaid
 sequenceDiagram
-    participant AWX as AWX
-    participant IF as interface.py
-    participant RN as FTL2Runner
-    participant FTL as FTL2 automation()
-    participant AR as ArtifactWriter
+    participant AWX as AWX Controller
+    participant RX as Receptor
+    participant WK as ftl2-runner worker
+    participant FTL as /opt/ftl2/main.py
 
-    AWX->>IF: run(module="ping", host_pattern="all")
-    IF->>RN: FTL2Runner(config)
-    IF->>RN: runner.run()
+    AWX->>RX: transmit(private_data_dir)
+    RX->>WK: unpack to /runner
 
-    RN->>RN: status_callback("starting")
-    RN->>AR: create artifact dirs
+    WK->>WK: Load /runner/inventory/
+    WK->>WK: Load /runner/env/extravars
+    WK->>WK: Ignore playbook/module
 
-    RN->>FTL: asyncio.run(_run_async())
+    WK->>FTL: Execute with inventory + vars
 
-    loop For each host
-        FTL->>RN: on_event(module_start)
-        RN->>AR: write job_events/N-uuid.json
+    loop FTL2 execution
+        FTL->>WK: on_event(module_start)
+        WK->>RX: stream event (runner_on_start)
         FTL->>FTL: execute module
-        FTL->>RN: on_event(module_complete)
-        RN->>AR: write job_events/N-uuid.json
+        FTL->>WK: on_event(module_complete)
+        WK->>RX: stream event (runner_on_ok)
     end
 
-    FTL-->>RN: execution complete
-    RN->>RN: status_callback("successful")
-    RN->>AR: write rc, status
-    RN->>AWX: finished_callback(runner)
-    RN-->>IF: return runner
-    IF-->>AWX: return runner
+    FTL-->>WK: execution complete
+    WK->>WK: write artifacts (rc, status)
+    WK->>RX: stream final events
+    RX->>AWX: process(results)
 ```
 
-## Component Overview
-
-### Package Structure
+## Package Structure
 
 ```
 ftl2-runner/
 ├── pyproject.toml
 ├── README.md
 ├── docs/
-│   ├── ftl2-runner-design.md
-│   ├── architecture.png
-│   └── execution-flow.png
+│   └── ftl2-runner-design.md
 └── src/
     └── ftl2_runner/
-        ├── __init__.py
-        ├── interface.py
-        ├── runner.py
-        ├── config.py
-        ├── events.py
-        ├── artifacts.py
-        ├── inventory_adapter.py
-        └── exceptions.py
+        ├── __init__.py           # Package exports
+        ├── cli.py                # CLI entry point (worker command)
+        ├── worker.py             # Worker implementation
+        ├── events.py             # Event translation (FTL2 → ansible-runner)
+        ├── artifacts.py          # Artifact directory management
+        └── exceptions.py         # Exception classes
 ```
 
-### Interface Functions (`interface.py`)
+## CLI Interface
 
-Replicates ansible-runner's public API:
+```bash
+# Primary command - run as ansible-runner worker replacement
+ftl2-runner worker --private-data-dir=/runner
 
+# Options (compatible with ansible-runner worker)
+ftl2-runner worker [--delete] --private-data-dir=PATH
+```
+
+## Worker Implementation
+
+### Input (from AWX via private_data_dir)
+
+```
+/runner/
+├── inventory/           # ← Pass to FTL2
+│   └── hosts
+├── env/
+│   └── extravars       # ← Pass to FTL2 as variables
+├── project/            # ← IGNORED
+│   └── playbook.yml
+└── artifacts/          # ← Write output here
+```
+
+### Processing
+
+1. **Load inventory** from `/runner/inventory/` → FTL2 inventory
+2. **Load extravars** from `/runner/env/extravars` (JSON) → FTL2 variables
+3. **Ignore** playbook, module, module_args, etc.
+4. **Execute** baked-in script at `/opt/ftl2/main.py`
+5. **Stream events** in ansible-runner format to stdout
+6. **Write artifacts** to `/runner/artifacts/`
+
+### Baked-in Script Location
+
+The FTL2 automation script is baked into the execution environment at:
+```
+/opt/ftl2/main.py
+```
+
+This script receives:
+- `inventory`: Path to inventory directory
+- `extravars`: Dict of extra variables from AWX
+
+Example script structure:
 ```python
-def run(**kwargs) -> FTL2Runner:
-    """Synchronous execution, returns Runner when complete."""
+# /opt/ftl2/main.py
+import asyncio
+from ftl2 import automation
 
-def run_async(**kwargs) -> tuple[threading.Thread, FTL2Runner]:
-    """Async execution in thread, returns (thread, runner)."""
+async def main(inventory_path: str, extravars: dict):
+    async with automation(inventory=inventory_path) as ftl:
+        # Your automation here
+        await ftl.ping()
 
-def init_runner(**kwargs) -> FTL2Runner:
-    """Initialize without running."""
+if __name__ == "__main__":
+    # Called by ftl2-runner worker
+    pass
 ```
 
-### FTL2RunnerConfig (`config.py`)
+## Event Translation
 
-Translates ansible-runner parameters to FTL2 configuration:
-
-| ansible-runner | FTL2 |
-|---------------|------|
-| `module` | Module name for execution |
-| `module_args` | Parsed to dict for module call |
-| `host_pattern` | Filter on FTL2 Inventory |
-| `inventory` | FTL2 Inventory object |
-| `limit` | Additional host filter |
-| `forks` | Chunk size for parallel execution |
-| `timeout` | FTL2 timeout |
-| `verbosity` | `verbose=True` if > 0 |
-| `envvars` | Environment for module execution |
-| `extravars` | Merged into module_args |
-
-### FTL2Runner (`runner.py`)
-
-Compatible with ansible-runner's Runner class:
-
-**Properties:**
-- `status`: "unstarted" | "starting" | "running" | "successful" | "failed" | "timeout" | "canceled"
-- `rc`: Return code (0 = success)
-- `events`: Generator yielding event dicts from job_events/
-- `stdout`: File handle to stdout artifact
-- `stderr`: File handle to stderr artifact
-- `stats`: Dict with ok/failed/changed counts per host
-- `canceled`, `timed_out`, `errored`: Boolean flags
-
-**Methods:**
-- `run()`: Execute synchronously using `asyncio.run()`
-- `host_events(host)`: Filter events by host
-
-### EventTranslator (`events.py`)
-
-Converts FTL2 events to ansible-runner format:
+FTL2 events are translated to ansible-runner format for AWX compatibility:
 
 | FTL2 Event | ansible-runner Event |
 |-----------|---------------------|
 | `module_start` | `runner_on_start` |
-| `module_complete` (success=True) | `runner_on_ok` |
-| `module_complete` (success=False) | `runner_on_failed` |
+| `module_complete` (success) | `runner_on_ok` |
+| `module_complete` (failed) | `runner_on_failed` |
 
-**Event Structure:**
+### Event Structure
+
 ```json
 {
     "event": "runner_on_ok",
-    "uuid": "<uuid4>",
+    "uuid": "550e8400-e29b-41d4-a716-446655440000",
     "counter": 1,
-    "created": "2026-02-09T10:00:00.000000",
-    "runner_ident": "<ident>",
+    "created": "2026-02-09T10:00:00.000000+00:00",
+    "runner_ident": "1",
     "event_data": {
-        "host": "localhost",
-        "task": "ping",
-        "task_action": "ping",
-        "res": {"ping": "pong", "changed": false}
+        "host": "webserver01",
+        "task": "file",
+        "task_action": "file",
+        "res": {
+            "changed": true,
+            "path": "/tmp/test"
+        }
     }
 }
 ```
 
-### ArtifactWriter (`artifacts.py`)
-
-Creates artifact directory structure AWX expects:
+## Artifact Output
 
 ```
-artifacts/<ident>/
+/runner/artifacts/<ident>/
 ├── job_events/
 │   ├── 1-<uuid>.json
-│   └── 2-<uuid>.json
+│   ├── 2-<uuid>.json
+│   └── ...
 ├── stdout
 ├── stderr
 ├── rc
-├── status
-└── command
+└── status
 ```
 
-### InventoryAdapter (`inventory_adapter.py`)
+## Execution Environment Setup
 
-Converts ansible-runner inventory formats to FTL2 Inventory:
+The execution environment container image must include:
 
-- Path string → Load from file
-- Dict → Convert to FTL2 Inventory
-- INI string → Parse to Inventory
-- Host list → Create simple inventory
-- None → Use localhost
+1. **ftl2-runner package** - This package
+2. **ftl2 package** - FTL2 automation framework
+3. **Baked-in script** - `/opt/ftl2/main.py`
+4. **Entry point** - `ftl2-runner worker`
 
-## Scope
+Example Containerfile:
+```dockerfile
+FROM quay.io/ansible/ansible-runner:latest
 
-### MVP: Ad-hoc Module Execution
-- `run()`, `run_async()`, `init_runner()` functions
-- `Runner` class with status, events, stdout/stderr
-- Artifact directory structure
-- Event translation
+# Install FTL2 and ftl2-runner
+RUN pip install ftl2 ftl2-runner
 
-### Out of Scope (Future)
-- Playbook execution (FTL2 executes modules directly)
-- Roles and collections as first-class objects
-- Process isolation / containerization
-- Vault / encrypted variables
-- Streaming pipeline (transmit/worker/process)
+# Copy baked-in automation script
+COPY main.py /opt/ftl2/main.py
+
+# Override entry point (or AWX will call ansible-runner worker)
+# Note: AWX sends the command, so this may need receptor config instead
+```
+
+## What We Ignore from AWX
+
+- `project/` directory (playbooks)
+- `playbook` parameter
+- `module` and `module_args` parameters
+- `role` parameter
+- Most env/ files except `extravars`
+
+## What We Pass Through
+
+- `inventory/` directory → FTL2 inventory
+- `env/extravars` → FTL2 variables dict
+- `ident` → Runner identifier for artifacts
 
 ## Limitations
 
-1. **No Playbook Support** - FTL2 executes modules directly, not YAML playbooks
-2. **No Roles** - Roles require playbook context
-3. **No Jinja2** - Variables passed directly, no templating
-4. **No Process Isolation** - FTL2 uses SSH, not containers
-5. **No Vault** - Encrypted variables not supported
-6. **Simplified Host Patterns** - Basic glob matching only
+1. **Fixed automation** - Same script runs every time (configurable via extravars)
+2. **No playbook support** - Playbooks from AWX are ignored
+3. **No ad-hoc commands** - Module/module_args ignored
+4. **Inventory format** - Must be compatible with FTL2's inventory loader

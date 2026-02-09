@@ -1,40 +1,44 @@
 graph TB
-    subgraph "AWX / Controller"
+    subgraph "AWX Controller"
         AWX[AWX Controller]
+        TX[Transmit Phase]
+        PX[Process Phase]
     end
 
-    subgraph "ftl2-runner Package"
-        IF[interface.py<br/>run, run_async, init_runner]
-        RC[config.py<br/>FTL2RunnerConfig]
-        RN[runner.py<br/>FTL2Runner]
-        EV[events.py<br/>EventTranslator]
-        AR[artifacts.py<br/>ArtifactWriter]
-        IA[inventory_adapter.py<br/>InventoryAdapter]
+    subgraph "Receptor Network"
+        RX[Receptor]
     end
 
-    subgraph "FTL2 Engine"
-        AUTO[automation context]
-        EXEC[ModuleExecutor]
-        GATE[Gate System]
+    subgraph "Execution Environment Container"
+        WK[ftl2-runner worker]
+
+        subgraph "Private Data Dir"
+            INV["inventory/"]
+            ENV["env/extravars"]
+            PB["project/playbook.yml IGNORED"]
+        end
+
+        subgraph "Baked-in Script"
+            FTL["main.py"]
+        end
+
+        subgraph "FTL2 Engine"
+            AUTO[automation context]
+            EXEC[ModuleExecutor]
+        end
+
+        ART["artifacts/"]
     end
 
-    subgraph "Artifacts"
-        JE[job_events/*.json]
-        SO[stdout]
-        SE[stderr]
-        ST[status, rc]
-    end
-
-    AWX -->|"run(module='ping', ...)"| IF
-    IF --> RC
-    IF --> RN
-    RC --> IA
-    RN -->|"asyncio.run()"| AUTO
+    AWX --> TX
+    TX -->|stream private_data_dir| RX
+    RX -->|unpack| WK
+    WK -->|read| INV
+    WK -->|read| ENV
+    WK -->|execute| FTL
+    FTL --> AUTO
     AUTO --> EXEC
-    EXEC --> GATE
-    RN --> EV
-    EV --> AR
-    AR --> JE
-    AR --> SO
-    AR --> SE
-    AR --> ST
+    EXEC -->|results| ART
+    WK -->|stream events| RX
+    RX --> PX
+    PX --> AWX
