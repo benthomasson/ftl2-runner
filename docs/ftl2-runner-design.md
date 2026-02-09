@@ -29,14 +29,14 @@ graph TB
     subgraph "Execution Environment Container"
         WK[ftl2-runner worker]
 
-        subgraph "Private Data Dir /runner"
-            INV[inventory/]
-            ENV[env/extravars]
-            PB[project/playbook.yml<br/>IGNORED]
+        subgraph "Private Data Dir"
+            INV["inventory/"]
+            ENV["env/extravars"]
+            PB["project/playbook.yml IGNORED"]
         end
 
         subgraph "Baked-in Script"
-            FTL[/opt/ftl2/main.py]
+            FTL["main.py"]
         end
 
         subgraph "FTL2 Engine"
@@ -44,7 +44,7 @@ graph TB
             EXEC[ModuleExecutor]
         end
 
-        ART[artifacts/]
+        ART["artifacts/"]
     end
 
     AWX --> TX
@@ -68,29 +68,29 @@ sequenceDiagram
     participant AWX as AWX Controller
     participant RX as Receptor
     participant WK as ftl2-runner worker
-    participant FTL as /opt/ftl2/main.py
+    participant FTL as main.py
 
-    AWX->>RX: transmit(private_data_dir)
-    RX->>WK: unpack to /runner
+    AWX->>RX: transmit private_data_dir
+    RX->>WK: unpack to runner dir
 
-    WK->>WK: Load /runner/inventory/
-    WK->>WK: Load /runner/env/extravars
-    WK->>WK: Ignore playbook/module
+    WK->>WK: Load inventory
+    WK->>WK: Load extravars
+    WK->>WK: Ignore playbook
 
     WK->>FTL: Execute with inventory + vars
 
     loop FTL2 execution
-        FTL->>WK: on_event(module_start)
-        WK->>RX: stream event (runner_on_start)
+        FTL->>WK: on_event module_start
+        WK->>RX: stream event runner_on_start
         FTL->>FTL: execute module
-        FTL->>WK: on_event(module_complete)
-        WK->>RX: stream event (runner_on_ok)
+        FTL->>WK: on_event module_complete
+        WK->>RX: stream event runner_on_ok
     end
 
     FTL-->>WK: execution complete
-    WK->>WK: write artifacts (rc, status)
+    WK->>WK: write artifacts
     WK->>RX: stream final events
-    RX->>AWX: process(results)
+    RX->>AWX: process results
 ```
 
 ## Package Structure
