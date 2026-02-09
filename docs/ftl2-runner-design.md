@@ -1,16 +1,17 @@
 # FTL2-Runner: ansible-runner Compatibility Layer
 
-A drop-in replacement for ansible-runner's worker mode that runs a baked-in FTL2 script inside AWX execution environments.
+A drop-in replacement for the `ansible-runner` binary that runs a baked-in FTL2 script inside AWX execution environments.
 
 ## Overview
 
 Instead of translating ansible-runner API calls to FTL2, this package:
 
-1. **Implements ansible-runner's worker CLI** - `ftl2-runner worker --private-data-dir=/runner`
-2. **Ignores playbooks/tasks from AWX** - We don't execute what AWX sends
-3. **Runs a baked-in FTL2 script** - Pre-built automation at `/opt/ftl2/main.py`
-4. **Passes through inventory and extra_vars** - From AWX's private_data_dir
-5. **Emits ansible-runner format events** - So AWX can track progress
+1. **Replaces the ansible-runner binary** - Symlink `ansible-runner` → `ftl2-runner`
+2. **Implements the worker CLI** - `ansible-runner worker --private-data-dir=/runner`
+3. **Ignores playbooks/tasks from AWX** - We don't execute what AWX sends
+4. **Runs a baked-in FTL2 script** - Pre-built automation at `/opt/ftl2/main.py`
+5. **Passes through inventory and extra_vars** - From AWX's private_data_dir
+6. **Emits ansible-runner format events** - So AWX can track progress
 
 ## Architecture
 
@@ -104,77 +105,116 @@ ftl2-runner/
 └── src/
     └── ftl2_runner/
         ├── __init__.py           # Package exports
-        ├── cli.py                # CLI entry point (worker command)
+        ├── __main__.py           # CLI entry point
         ├── worker.py             # Worker implementation
+        ├── streaming.py          # Stdin/stdout streaming (unpack/pack)
         ├── events.py             # Event translation (FTL2 → ansible-runner)
-        ├── artifacts.py          # Artifact directory management
-        └── exceptions.py         # Exception classes
+        └── capacity.py           # CPU/memory info for --worker-info
 ```
 
 ## CLI Interface
 
-```bash
-# Primary command - run as ansible-runner worker replacement
-ftl2-runner worker --private-data-dir=/runner
+The CLI must be compatible with ansible-runner's interface since Receptor calls it directly.
 
-# Options (compatible with ansible-runner worker)
-ftl2-runner worker [--delete] --private-data-dir=PATH
+```bash
+# Primary command invoked by Receptor
+ansible-runner worker --private-data-dir=/runner
+
+# Full worker options
+ansible-runner worker [OPTIONS]
+  --private-data-dir PATH    Base directory for job data (required)
+  --worker-info              Return CPU/memory/version JSON and exit
+  --delete                   Delete private_data_dir before/after job
+  --keepalive-seconds N      Send keepalive events at interval
+
+# Worker subcommands
+ansible-runner worker cleanup [OPTIONS]
+  --file-pattern PATTERN     Glob pattern for directories to clean
+  --remove-images            Also remove container images
+  --grace-period SECONDS     Only clean items older than this
+```
+
+### --worker-info Response
+
+AWX calls this for health checks. Must return YAML:
+
+```yaml
+{mem_in_bytes: 16000000000, cpu_count: 8, runner_version: '2.4.0', uuid: 'abc123'}
 ```
 
 ## Worker Implementation
 
-### Input (from AWX via private_data_dir)
+### Streaming Protocol
+
+1. **Receive data from stdin** - Receptor streams tar data from transmit phase
+2. **Unpack to private_data_dir** - Extract inventory/, env/, project/, artifacts/
+3. **Execute job** - Run baked-in FTL2 script
+4. **Write events to stdout** - ansible-runner event JSON format
+5. **Write artifacts** - job_events/*.json, stdout, stderr, rc, status
+
+### Input Directory Structure
 
 ```
 /runner/
 ├── inventory/           # ← Pass to FTL2
 │   └── hosts
 ├── env/
-│   └── extravars       # ← Pass to FTL2 as variables
+│   ├── extravars       # ← Pass to FTL2 as variables (JSON)
+│   ├── settings        # Runner settings (ignored)
+│   └── ssh_key         # SSH key (ignored - FTL2 handles SSH)
 ├── project/            # ← IGNORED
 │   └── playbook.yml
 └── artifacts/          # ← Write output here
+    └── <ident>/
 ```
 
-### Processing
+### Processing Steps
 
-1. **Load inventory** from `/runner/inventory/` → FTL2 inventory
-2. **Load extravars** from `/runner/env/extravars` (JSON) → FTL2 variables
-3. **Ignore** playbook, module, module_args, etc.
-4. **Execute** baked-in script at `/opt/ftl2/main.py`
-5. **Stream events** in ansible-runner format to stdout
-6. **Write artifacts** to `/runner/artifacts/`
+1. Read streaming data from stdin (if no --private-data-dir exists)
+2. Unpack tar to private_data_dir
+3. Load `inventory/` directory path
+4. Load `env/extravars` as JSON dict
+5. Execute `/opt/ftl2/main.py` with inventory + extravars
+6. Translate FTL2 events → ansible-runner format
+7. Stream events to stdout
+8. Write artifacts to `artifacts/<ident>/`
+9. Clean up if --delete was specified
 
-### Baked-in Script Location
+### Baked-in Script Interface
 
-The FTL2 automation script is baked into the execution environment at:
+The FTL2 script at `/opt/ftl2/main.py` is called with:
+
+```python
+async def run(inventory_path: str, extravars: dict, on_event: Callable) -> int:
+    """
+    Args:
+        inventory_path: Path to inventory directory
+        extravars: Dict of extra variables from AWX
+        on_event: Callback for FTL2 events
+
+    Returns:
+        Exit code (0 = success)
+    """
 ```
-/opt/ftl2/main.py
-```
 
-This script receives:
-- `inventory`: Path to inventory directory
-- `extravars`: Dict of extra variables from AWX
+Example implementation:
 
-Example script structure:
 ```python
 # /opt/ftl2/main.py
 import asyncio
 from ftl2 import automation
 
-async def main(inventory_path: str, extravars: dict):
-    async with automation(inventory=inventory_path) as ftl:
-        # Your automation here
+async def run(inventory_path: str, extravars: dict, on_event) -> int:
+    async with automation(inventory=inventory_path, on_event=on_event) as ftl:
+        # Your automation here - extravars can control behavior
+        target = extravars.get('target_hosts', 'all')
         await ftl.ping()
-
-if __name__ == "__main__":
-    # Called by ftl2-runner worker
-    pass
+    return 0
 ```
 
 ## Event Translation
 
-FTL2 events are translated to ansible-runner format for AWX compatibility:
+FTL2 events are translated to ansible-runner format:
 
 | FTL2 Event | ansible-runner Event |
 |-----------|---------------------|
@@ -182,7 +222,7 @@ FTL2 events are translated to ansible-runner format for AWX compatibility:
 | `module_complete` (success) | `runner_on_ok` |
 | `module_complete` (failed) | `runner_on_failed` |
 
-### Event Structure
+### Event JSON Structure
 
 ```json
 {
@@ -219,40 +259,39 @@ FTL2 events are translated to ansible-runner format for AWX compatibility:
 
 ## Execution Environment Setup
 
-The execution environment container image must include:
-
-1. **ftl2-runner package** - This package
-2. **ftl2 package** - FTL2 automation framework
-3. **Baked-in script** - `/opt/ftl2/main.py`
-4. **Entry point** - `ftl2-runner worker`
-
-Example Containerfile:
 ```dockerfile
 FROM quay.io/ansible/ansible-runner:latest
 
 # Install FTL2 and ftl2-runner
 RUN pip install ftl2 ftl2-runner
 
+# Replace ansible-runner binary with ftl2-runner
+RUN ln -sf $(which ftl2-runner) /usr/local/bin/ansible-runner
+
 # Copy baked-in automation script
 COPY main.py /opt/ftl2/main.py
-
-# Override entry point (or AWX will call ansible-runner worker)
-# Note: AWX sends the command, so this may need receptor config instead
 ```
 
-## What We Ignore from AWX
+## What We Handle
+
+| Feature | Status |
+|---------|--------|
+| `worker --private-data-dir` | ✅ Implemented |
+| `worker --worker-info` | ✅ Implemented |
+| `worker --delete` | ✅ Implemented |
+| `worker --keepalive-seconds` | ✅ Implemented |
+| `worker cleanup` | ⚠️ Stub (returns success) |
+| Streaming from stdin | ✅ Implemented |
+| Event streaming to stdout | ✅ Implemented |
+| Artifact writing | ✅ Implemented |
+
+## What We Ignore
 
 - `project/` directory (playbooks)
-- `playbook` parameter
-- `module` and `module_args` parameters
+- `playbook`, `module`, `module_args` parameters
 - `role` parameter
-- Most env/ files except `extravars`
-
-## What We Pass Through
-
-- `inventory/` directory → FTL2 inventory
-- `env/extravars` → FTL2 variables dict
-- `ident` → Runner identifier for artifacts
+- Most `env/` files except `extravars`
+- Container isolation options (FTL2 handles SSH directly)
 
 ## Limitations
 
