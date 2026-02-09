@@ -185,6 +185,7 @@ def stream_dir(source_directory: str, stream: BinaryIO) -> None:
         with open(tmp_path, "rb") as source:
             while chunk := source.read(1024 * 1000):
                 writer.write(chunk)
+        stream.write(b"\n")  # Newline after base64 data
         stream.flush()
 
     finally:
