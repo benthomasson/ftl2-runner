@@ -1,0 +1,5 @@
+# System dependencies for ftl2-runner
+# Most dependencies are Python-only, but SSH client is needed for remote hosts
+
+openssh-clients [platform:centos-8 platform:rhel-8 platform:fedora]
+openssh-client [platform:debian platform:ubuntu]

@@ -1,0 +1,23 @@
+---
+version: 3
+
+images:
+  base_image:
+    name: quay.io/ansible/ansible-runner:latest
+
+dependencies:
+  python:
+    - requirements.txt
+
+additional_build_files:
+  - src: files/example-script.py
+    dest: configs
+
+additional_build_steps:
+  # Install ftl2-runner and symlink to replace ansible-runner
+  append_final:
+    - COPY _build/configs/example-script.py /opt/ftl2/main.py
+    - RUN ln -sf /usr/local/bin/ftl2-runner /usr/local/bin/ansible-runner
+
+options:
+  package_manager_path: /usr/bin/dnf

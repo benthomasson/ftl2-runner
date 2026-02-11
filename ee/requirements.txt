@@ -1,0 +1,9 @@
+# ftl2-runner and its dependencies
+# For production, use a released version:
+#   ftl2-runner==0.2.0
+# For development, use git:
+ftl2-runner @ git+https://github.com/benthomasson/ftl2-runner
+
+# FTL2 is pulled in as a dependency of ftl2-runner
+# If you need a specific version:
+#   ftl2 @ git+https://github.com/benthomasson/ftl2@v1.0.0

@@ -128,12 +128,16 @@ def handle_worker(args: argparse.Namespace) -> int:
     os.makedirs(private_data_dir, exist_ok=True)
 
     # Run the worker
-    from ftl2_runner.worker import run_worker
+    from ftl2_runner.worker import run_worker, DEFAULT_SCRIPT_PATH
+
+    # Script path from environment or default
+    script_path = os.environ.get("FTL2_SCRIPT", DEFAULT_SCRIPT_PATH)
 
     try:
         rc = run_worker(
             private_data_dir=private_data_dir,
             keepalive_seconds=args.keepalive_seconds,
+            script_path=script_path,
         )
     finally:
         # Cleanup if --delete was specified

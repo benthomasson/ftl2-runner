@@ -1,0 +1,32 @@
+# FTL2-Runner Execution Environment
+# Build: docker build -t ftl2-runner-ee:latest -f Containerfile .
+
+FROM python:3.13-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssh-client \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip
+RUN pip install --no-cache-dir --upgrade pip
+
+# Install ftl2-runner (pulls FTL2 as dependency)
+RUN pip install --no-cache-dir \
+    "ftl2-runner @ git+https://github.com/benthomasson/ftl2-runner"
+
+# Copy the FTL2 script
+COPY files/example-script.py /opt/ftl2/main.py
+
+# Create symlink so AWX/Receptor can call ansible-runner
+RUN ln -sf /usr/local/bin/ftl2-runner /usr/local/bin/ansible-runner
+
+# Create runner user (matches ansible-runner convention)
+RUN useradd -m runner
+USER runner
+WORKDIR /runner
+
+# Default entrypoint for Receptor work-command
+ENTRYPOINT ["ftl2-runner"]
+CMD ["worker"]

@@ -63,7 +63,14 @@ ftl2-runner worker --worker-info
 
 ### Custom Script Path
 
-For development/testing, specify a custom FTL2 script:
+Override the default script location (`/opt/ftl2/main.py`) via environment variable:
+
+```bash
+export FTL2_SCRIPT=/path/to/my_script.py
+ftl2-runner worker --private-data-dir=/tmp/work
+```
+
+Or programmatically:
 
 ```python
 from ftl2_runner.worker import run_worker
@@ -75,40 +82,35 @@ run_worker(
 )
 ```
 
-## FTL2 Script Format
+## FTL2 Script Format (v0.2+)
 
 The baked-in script must define an async `run` function:
 
 ```python
-async def run(inventory_path: str, extravars: dict, on_event: callable) -> int:
+async def run(inventory_path: str, extravars: dict, runner) -> int:
     """Execute FTL2 automation.
 
     Args:
         inventory_path: Path to inventory directory
         extravars: Extra variables from AWX
-        on_event: Callback to emit events
+        runner: RunnerContext for automatic event streaming
 
     Returns:
         Exit code (0 = success)
     """
-    on_event({
-        "event": "module_start",
-        "module": "my_module",
-        "host": "localhost",
-    })
-
-    # Do work...
-
-    on_event({
-        "event": "module_complete",
-        "module": "my_module",
-        "host": "localhost",
-        "success": True,
-        "changed": False,
-        "result": {"msg": "Done"},
-    })
-
+    async with runner.automation() as ftl:
+        await ftl.ping()
+        await ftl.file(path="/tmp/test", state="directory")
+        await ftl.command(cmd="echo hello")
     return 0
+```
+
+Events are emitted automatically when modules execute - no manual event handling needed.
+
+For custom events (non-module progress), use `runner.emit_event()`:
+
+```python
+runner.emit_event({"event": "custom_progress", "message": "Phase 1 complete"})
 ```
 
 ## Event Translation
@@ -139,8 +141,24 @@ uv run pytest tests/test_receptor_integration.py -v
 
 See [docs/receptor-test.md](docs/receptor-test.md) for manual Receptor testing instructions.
 
+## Execution Environment for AWX
+
+Build an AWX-compatible execution environment using ansible-builder:
+
+```bash
+cd ee/
+pip install ansible-builder
+ansible-builder build --tag ftl2-runner-ee:latest
+```
+
+The EE bakes your FTL2 script into `/opt/ftl2/main.py`. See [ee/README.md](ee/README.md) for:
+- Customizing the baked-in script
+- Using `FTL2_SCRIPT` environment variable for runtime script selection
+- AWX configuration instructions
+
 ## Documentation
 
+- [Execution Environment](ee/README.md) - Building and deploying to AWX
 - [Design Document](docs/ftl2-runner-design.md) - Architecture and implementation details
 - [Receptor Testing](docs/receptor-test.md) - Manual testing with Receptor
 
