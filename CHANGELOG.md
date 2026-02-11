@@ -2,6 +2,18 @@
 
 All notable changes to ftl2-runner are documented in this file.
 
+## [0.4.0] - 2026-02-11
+
+### Added
+- Playbook-as-script support: AWX playbook files are executed as FTL2 Python scripts
+- `playbook` subcommand (`ftl2-runner playbook`) providing ansible-playbook CLI compatibility for container mode
+- `hosts: all` trick for `.yml` files that pass AWX's playbook discovery regex while being valid Python
+- Worker mode now extracts `playbook` from kwargs and uses it as the script path
+- `SourceFileLoader` for loading scripts with any file extension (including `.yml`)
+- Dev Containerfile (`ee/Containerfile.dev`) for building EEs from local source
+- `ansible-playbook` wrapper script in EE that routes to `ftl2-runner playbook`
+- Example playbook script (`examples/ping_playbook.yml`)
+
 ## [0.3.1] - 2026-02-11
 
 ### Added

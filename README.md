@@ -4,7 +4,7 @@ A drop-in replacement for [ansible-runner](https://github.com/ansible/ansible-ru
 
 ## Overview
 
-ftl2-runner enables AWX/AAP to use FTL2 for job execution by implementing the ansible-runner worker protocol. When deployed in an execution environment, Receptor calls ftl2-runner instead of ansible-runner, and ftl2-runner executes a baked-in FTL2 script while emitting ansible-runner compatible events.
+ftl2-runner enables AWX/AAP to use FTL2 for job execution by implementing the ansible-runner worker protocol. When deployed in an execution environment, it replaces both `ansible-runner` and `ansible-playbook`, executing FTL2 scripts (delivered as AWX "playbooks" or baked into the EE) while emitting ansible-runner compatible events.
 
 ```
 ┌─────────────┐     ┌──────────┐     ┌─────────────┐     ┌──────────────┐
@@ -223,6 +223,7 @@ The EE bakes your FTL2 script into `/opt/ftl2/main.py`. See [ee/README.md](ee/RE
 
 **Implemented:**
 - Worker CLI compatible with Receptor work-command
+- Playbook-as-script execution (`ftl2-runner playbook`)
 - Ad-hoc command execution (`ftl2-runner adhoc`)
 - Streaming protocol (stdin/stdout)
 - Event translation to ansible-runner format
