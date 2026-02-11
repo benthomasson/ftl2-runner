@@ -254,6 +254,28 @@ def create_adhoc_parser(subparsers: argparse._SubParsersAction) -> argparse.Argu
         help="Show differences (ignored)",
     )
 
+    adhoc_parser.add_argument(
+        "-e", "--extra-vars",
+        dest="extra_vars",
+        action="append",
+        default=[],
+        help="Extra variables (ignored - use module args)",
+    )
+
+    adhoc_parser.add_argument(
+        "--ask-pass",
+        dest="ask_pass",
+        action="store_true",
+        help="Ask for SSH password (ignored)",
+    )
+
+    adhoc_parser.add_argument(
+        "--ask-become-pass",
+        dest="ask_become_pass",
+        action="store_true",
+        help="Ask for become password (ignored)",
+    )
+
     return adhoc_parser
 
 
