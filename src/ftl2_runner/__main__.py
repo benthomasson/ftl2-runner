@@ -2,6 +2,8 @@
 
 This provides a drop-in replacement for ansible-runner's worker command.
 Receptor calls: ansible-runner worker --private-data-dir=/runner
+
+Also provides an `adhoc` command for running ad-hoc modules like the `ansible` CLI.
 """
 
 import argparse
@@ -13,6 +15,7 @@ import tempfile
 import yaml
 
 from ftl2_runner.capacity import get_worker_info
+from ftl2_runner.adhoc import create_adhoc_parser, handle_adhoc
 
 
 def main(args: list[str] | None = None) -> int:
@@ -23,6 +26,9 @@ def main(args: list[str] | None = None) -> int:
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # Ad-hoc command (mimics ansible CLI)
+    create_adhoc_parser(subparsers)
 
     # Worker command
     worker_parser = subparsers.add_parser(
@@ -97,6 +103,8 @@ def main(args: list[str] | None = None) -> int:
 
     if parsed.command == "worker":
         return handle_worker(parsed)
+    elif parsed.command == "adhoc":
+        return handle_adhoc(parsed)
     else:
         parser.print_help()
         return 1

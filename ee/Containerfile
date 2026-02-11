@@ -22,11 +22,15 @@ COPY files/example-script.py /opt/ftl2/main.py
 # Create symlink so AWX/Receptor can call ansible-runner
 RUN ln -sf /usr/local/bin/ftl2-runner /usr/local/bin/ansible-runner
 
+# Create ansible wrapper that uses ftl2-runner adhoc
+# This allows AWX to run ad-hoc commands like: ansible -m ping localhost
+RUN echo '#!/bin/bash\nexec ftl2-runner adhoc "$@"' > /usr/local/bin/ansible && \
+    chmod +x /usr/local/bin/ansible
+
 # Create runner user (matches ansible-runner convention)
 RUN useradd -m runner
 USER runner
 WORKDIR /runner
 
-# Default entrypoint for Receptor work-command
-ENTRYPOINT ["ftl2-runner"]
-CMD ["worker"]
+# No ENTRYPOINT - AWX calls specific binaries (ansible, ansible-runner)
+CMD ["bash"]
