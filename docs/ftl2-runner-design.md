@@ -109,6 +109,10 @@ ftl2-runner/
         ├── worker.py             # Worker implementation
         ├── streaming.py          # Stdin/stdout streaming (unpack/pack)
         ├── events.py             # Event translation (FTL2 → ansible-runner)
+        ├── adhoc.py              # Ad-hoc command execution
+        ├── runner_context.py     # RunnerContext for automatic event streaming
+        ├── artifacts.py          # Artifact file management
+        ├── exceptions.py         # Exception classes
         └── capacity.py           # CPU/memory info for --worker-info
 ```
 
@@ -132,6 +136,23 @@ ansible-runner worker cleanup [OPTIONS]
   --file-pattern PATTERN     Glob pattern for directories to clean
   --remove-images            Also remove container images
   --grace-period SECONDS     Only clean items older than this
+```
+
+```bash
+# Ad-hoc command (mimics ansible CLI)
+ansible-runner adhoc [OPTIONS] [HOST_PATTERN]
+  -m, --module-name MODULE   Module to execute (default: ping)
+  -a, --args ARGS            Module arguments (key=value, JSON, or free-form)
+  -i, --inventory PATH       Inventory file or directory
+  -C, --check                Check mode (dry run)
+  -v, --verbose              Increase verbosity
+  -e, --extra-vars VARS      Extra variables (ignored)
+  -u, --user USER            Remote user (ignored - FTL2 uses SSH config)
+  -b, --become               Become root (ignored)
+  -f, --forks N              Parallel processes (ignored - FTL2 uses async)
+  --diff                     Show differences (ignored)
+  --ask-pass                 Ask for SSH password (ignored)
+  --ask-become-pass          Ask for become password (ignored)
 ```
 
 ### --worker-info Response
@@ -281,6 +302,7 @@ COPY main.py /opt/ftl2/main.py
 | `worker --delete` | ✅ Implemented |
 | `worker --keepalive-seconds` | ✅ Implemented |
 | `worker cleanup` | ⚠️ Stub (returns success) |
+| `adhoc` command | ✅ Implemented |
 | Streaming from stdin | ✅ Implemented |
 | Event streaming to stdout | ✅ Implemented |
 | Artifact writing | ✅ Implemented |
@@ -288,8 +310,7 @@ COPY main.py /opt/ftl2/main.py
 ## What We Ignore
 
 - `project/` directory (playbooks)
-- `playbook`, `module`, `module_args` parameters
-- `role` parameter
+- `playbook` and `role` parameters
 - Most `env/` files except `extravars`
 - Container isolation options (FTL2 handles SSH directly)
 
@@ -297,5 +318,4 @@ COPY main.py /opt/ftl2/main.py
 
 1. **Fixed automation** - Same script runs every time (configurable via extravars)
 2. **No playbook support** - Playbooks from AWX are ignored
-3. **No ad-hoc commands** - Module/module_args ignored
-4. **Inventory format** - Must be compatible with FTL2's inventory loader
+3. **Inventory format** - Must be compatible with FTL2's inventory loader

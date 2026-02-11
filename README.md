@@ -61,6 +61,40 @@ ftl2-runner worker --worker-info
 # Output: {cpu_count: 8, mem_in_bytes: 17179869184, runner_version: 0.1.0, uuid: ...}
 ```
 
+### Ad-hoc Commands
+
+Run single modules against hosts, similar to the `ansible` CLI:
+
+```bash
+# Ping localhost
+ftl2-runner adhoc -m ping localhost
+
+# Run a command on all hosts
+ftl2-runner adhoc -m command -a "uptime" all
+
+# Run a shell command
+ftl2-runner adhoc -m shell -a "cat /etc/hostname" all
+
+# File operations with key=value args
+ftl2-runner adhoc -m file -a "path=/tmp/test state=directory" all
+
+# Check mode (dry run)
+ftl2-runner adhoc -C -m file -a "path=/tmp/test state=absent" all
+
+# With inventory
+ftl2-runner adhoc -i /path/to/inventory -m ping all
+
+# Verbose output
+ftl2-runner adhoc -v -m command -a "df -h" all
+```
+
+Module arguments (`-a`) support three formats:
+- **key=value**: `-a "path=/tmp/test state=directory"`
+- **JSON**: `-a '{"path": "/tmp/test", "state": "directory"}'`
+- **Free-form** (for command/shell/raw): `-a "echo hello"`
+
+Some ansible CLI flags (`-u`, `-b`, `--become-user`, `-f`, `--diff`) are accepted for compatibility but ignored — FTL2 handles SSH and privilege escalation through its own configuration.
+
 ### Custom Script Path
 
 Override the default script location (`/opt/ftl2/main.py`) via environment variable:
@@ -166,6 +200,7 @@ The EE bakes your FTL2 script into `/opt/ftl2/main.py`. See [ee/README.md](ee/RE
 
 **Implemented:**
 - Worker CLI compatible with Receptor work-command
+- Ad-hoc command execution (`ftl2-runner adhoc`)
 - Streaming protocol (stdin/stdout)
 - Event translation to ansible-runner format
 - Artifact streaming
