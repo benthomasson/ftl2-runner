@@ -1,0 +1,39 @@
+# FTL2-Runner Execution Environment (dev build from local source)
+# Build from repo root: docker build -t ftl2-runner-ee:dev -f ee/Containerfile.dev .
+
+FROM python:3.13-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssh-client \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip
+RUN pip install --no-cache-dir --upgrade pip
+
+# Copy local source and install
+COPY . /tmp/ftl2-runner
+RUN pip install --no-cache-dir /tmp/ftl2-runner && rm -rf /tmp/ftl2-runner
+
+# Copy the FTL2 script (fallback baked-in script)
+COPY ee/files/example-script.py /opt/ftl2/main.py
+
+# Create symlink so AWX/Receptor can call ansible-runner
+RUN ln -sf /usr/local/bin/ftl2-runner /usr/local/bin/ansible-runner
+
+# Create ansible wrapper that uses ftl2-runner adhoc
+RUN echo '#!/bin/bash\nexec ftl2-runner adhoc "$@"' > /usr/local/bin/ansible && \
+    chmod +x /usr/local/bin/ansible
+
+# Create ansible-playbook wrapper that routes to ftl2-runner playbook
+# AWX calls ansible-playbook directly in local/container mode
+RUN echo '#!/bin/bash\nexec ftl2-runner playbook "$@"' > /usr/local/bin/ansible-playbook && \
+    chmod +x /usr/local/bin/ansible-playbook
+
+# Create runner user (matches ansible-runner convention)
+RUN useradd -m runner
+USER runner
+WORKDIR /runner
+
+CMD ["bash"]

@@ -10,6 +10,7 @@ This handles the main execution flow:
 """
 
 import asyncio
+import importlib.machinery
 import importlib.util
 import json
 import os
@@ -112,7 +113,9 @@ def load_baked_script(script_path: str) -> Callable | None:
         return None
 
     try:
-        spec = importlib.util.spec_from_file_location("ftl2_script", script_path)
+        # Use SourceFileLoader to handle any file extension (including .yml)
+        loader = importlib.machinery.SourceFileLoader("ftl2_script", script_path)
+        spec = importlib.util.spec_from_loader("ftl2_script", loader)
         if spec is None or spec.loader is None:
             return None
 
@@ -202,6 +205,12 @@ def run_worker(
 
     # Get identifiers
     ident = get_ident(private_data_dir, kwargs)
+
+    # If AWX sent a playbook, use it as the script
+    if "playbook" in kwargs:
+        playbook_path = Path(private_data_dir) / "project" / kwargs["playbook"]
+        if playbook_path.exists():
+            script_path = str(playbook_path)
 
     # Setup artifact writer
     artifact_dir = Path(private_data_dir) / "artifacts" / ident

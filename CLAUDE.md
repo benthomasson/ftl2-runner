@@ -8,7 +8,8 @@ ftl2-runner is a drop-in replacement for ansible-runner's worker mode that uses 
 
 - **Worker Mode**: The primary interface - called by Receptor via CLI
 - **Streaming Protocol**: Line-delimited JSON over stdin/stdout for communication with Receptor
-- **Baked-in Script**: FTL2 script at `/opt/ftl2/main.py` that gets executed (ignores playbooks from AWX)
+- **Playbook as Script**: If AWX sends a playbook in kwargs, it's executed as a Python script (`.yml` files with `hosts: all` header pass AWX discovery)
+- **Baked-in Script**: Fallback FTL2 script at `/opt/ftl2/main.py` when no playbook is provided
 - **Event Translation**: Converts FTL2 events to ansible-runner format
 
 ## Project Structure

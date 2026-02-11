@@ -16,6 +16,7 @@ import yaml
 
 from ftl2_runner.capacity import get_worker_info
 from ftl2_runner.adhoc import create_adhoc_parser, handle_adhoc
+from ftl2_runner.playbook import create_playbook_parser, handle_playbook
 
 
 def main(args: list[str] | None = None) -> int:
@@ -29,6 +30,9 @@ def main(args: list[str] | None = None) -> int:
 
     # Ad-hoc command (mimics ansible CLI)
     create_adhoc_parser(subparsers)
+
+    # Playbook command (mimics ansible-playbook CLI)
+    create_playbook_parser(subparsers)
 
     # Worker command
     worker_parser = subparsers.add_parser(
@@ -105,6 +109,8 @@ def main(args: list[str] | None = None) -> int:
         return handle_worker(parsed)
     elif parsed.command == "adhoc":
         return handle_adhoc(parsed)
+    elif parsed.command == "playbook":
+        return handle_playbook(parsed)
     else:
         parser.print_help()
         return 1

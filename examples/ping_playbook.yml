@@ -1,0 +1,15 @@
+hosts: all  # noqa - satisfies AWX playbook discovery regex
+
+
+async def run(inventory_path, extravars, runner):
+    """FTL2 script disguised as a playbook.
+
+    AWX discovers this as a playbook because the first line matches
+    its regex: hosts: all
+
+    In Python, 'hosts: all' is a valid variable annotation
+    (annotating 'hosts' with the builtin 'all').
+    """
+    async with runner.automation() as ftl:
+        await ftl.ping()
+    return 0

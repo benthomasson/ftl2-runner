@@ -48,7 +48,7 @@ ftl2-runner is designed to be called by Receptor as a work-command:
 The worker:
 1. Receives streaming input via stdin (kwargs + zipped private_data_dir)
 2. Unpacks inventory and extravars
-3. Executes the baked-in FTL2 script at `/opt/ftl2/main.py`
+3. Executes the FTL2 script — either the playbook from AWX or the baked-in script at `/opt/ftl2/main.py`
 4. Streams ansible-runner compatible events to stdout
 5. Returns artifacts as a zipped stream
 
@@ -94,6 +94,29 @@ Module arguments (`-a`) support three formats:
 - **Free-form** (for command/shell/raw): `-a "echo hello"`
 
 Some ansible CLI flags (`-u`, `-b`, `--become-user`, `-f`, `--diff`) are accepted for compatibility but ignored — FTL2 handles SSH and privilege escalation through its own configuration.
+
+### Playbook as Script (AWX Integration)
+
+When AWX sends a job, it includes a `playbook` field in the kwargs. If that file exists in the project directory, ftl2-runner executes it as a Python script instead of the baked-in default. This lets you manage FTL2 scripts through AWX's normal project/job template workflow.
+
+Since AWX only discovers `.yml`/`.yaml` files as playbooks, your script needs a `.yml` extension and a first line that passes AWX's discovery regex. The trick: `hosts: all` is both a valid AWX playbook marker and a valid Python type annotation:
+
+```python
+# examples/ping_playbook.yml
+hosts: all  # noqa - satisfies AWX playbook discovery
+
+async def run(inventory_path, extravars, runner):
+    async with runner.automation() as ftl:
+        await ftl.ping()
+    return 0
+```
+
+To use this with AWX:
+1. Create a project (git repo or manual) containing your `.yml` script
+2. Create a job template pointing at the script as the "playbook"
+3. Run the job — ftl2-runner will execute it as Python
+
+If no playbook is provided in kwargs (or the file doesn't exist), ftl2-runner falls back to the baked-in script.
 
 ### Custom Script Path
 
@@ -208,7 +231,7 @@ The EE bakes your FTL2 script into `/opt/ftl2/main.py`. See [ee/README.md](ee/RE
 
 **Not Implemented:**
 - Full ansible-runner Python API (`run()`, `run_async()`, etc.)
-- Playbook execution (FTL2 executes baked-in scripts only)
+- Native playbook execution (AWX playbooks are treated as FTL2 scripts)
 - Process isolation / containerization
 - Vault / encrypted variables
 
