@@ -127,7 +127,11 @@ async def run_playbook(
     try:
         result = await run_func(inventory, extra_vars, runner)
         runner.emit_stats()
-        return result if isinstance(result, int) else 0
+        rc = result if isinstance(result, int) else 0
+        # If script returned success but tasks failed, report failure
+        if rc == 0 and runner.has_failures():
+            rc = 2
+        return rc
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1

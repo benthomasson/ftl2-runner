@@ -110,6 +110,10 @@ class RunnerContext:
         async with automation(on_event=self._handle_ftl2_event, **kwargs) as ftl:
             yield ftl
 
+    def has_failures(self) -> bool:
+        """Check if any tasks failed during execution."""
+        return any(counts.get("failed", 0) > 0 for counts in self._stats.values())
+
     def emit_stats(self) -> None:
         """Emit playbook_on_stats event with collected statistics."""
         if self._stats:

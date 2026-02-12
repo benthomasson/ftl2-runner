@@ -166,7 +166,11 @@ async def execute_script(
         # for automatic event streaming, or call runner.emit_event()
         # for manual events (backward compatible)
         result = await run_func(inventory_path, extravars, runner)
-        return result if isinstance(result, int) else 0
+        rc = result if isinstance(result, int) else 0
+        # If script returned success but tasks failed, report failure
+        if rc == 0 and runner.has_failures():
+            rc = 2
+        return rc
     except Exception as e:
         runner.emit_event({
             "event": "module_complete",
