@@ -19,15 +19,17 @@ class EventTranslator:
         {"event": "runner_on_ok", "uuid": "...", "counter": 2, ...}
     """
 
-    def __init__(self, ident: str, on_event: Callable[[dict], None] | None = None):
+    def __init__(self, ident: str, on_event: Callable[[dict], None] | None = None, verbosity: int = 0):
         """Initialize translator.
 
         Args:
             ident: Runner identifier (job ID)
             on_event: Callback for translated events
+            verbosity: Verbosity level (0=default, 1+=show result JSON)
         """
         self.ident = ident
         self.on_event = on_event
+        self.verbosity = verbosity
         self._counter = 0
         self._line = 0
         self._playbook_uuid: str | None = None
@@ -63,6 +65,7 @@ class EventTranslator:
 
         if event_type == "runner_on_ok":
             host = event_data.get("host", "localhost")
+            res = event_data.get("res", {})
             changed = event_data.get("changed", False)
             if changed:
                 color = self._COLOR_CHANGED
@@ -70,12 +73,16 @@ class EventTranslator:
             else:
                 color = self._COLOR_OK
                 prefix = "ok"
+            if self.verbosity >= 1:
+                return f"{color}{prefix}: [{host}] => {json.dumps(res, indent=4, default=str)}{self._COLOR_RESET}"
             return f"{color}{prefix}: [{host}]{self._COLOR_RESET}"
 
         elif event_type == "runner_on_failed":
             host = event_data.get("host", "localhost")
             res = event_data.get("res", {})
-            return f"{self._COLOR_FAILED}fatal: [{host}]: FAILED! => {json.dumps(res, indent=4, default=str)}{self._COLOR_RESET}"
+            fatal = f"{self._COLOR_FAILED}fatal: [{host}]: FAILED! => {json.dumps(res, indent=4, default=str)}{self._COLOR_RESET}"
+            ignoring = f"\n{self._COLOR_SKIP}...ignoring{self._COLOR_RESET}"
+            return fatal + ignoring
 
         elif event_type == "playbook_on_play_start":
             play_name = event_data.get("play", {}).get("name", "")

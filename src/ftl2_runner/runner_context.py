@@ -37,6 +37,7 @@ class RunnerContext:
         ident: str,
         on_event: Callable[[dict[str, Any]], None],
         stream: BinaryIO | None = None,
+        verbosity: int = 0,
     ):
         """Initialize RunnerContext.
 
@@ -44,11 +45,12 @@ class RunnerContext:
             ident: Job identifier (runner_ident in events)
             on_event: Callback for translated events
             stream: Optional output stream for stats event
+            verbosity: Verbosity level (0=default, 1+=show result JSON)
         """
         self.ident = ident
         self.on_event = on_event
         self.stream = stream
-        self.translator = EventTranslator(ident, on_event=on_event)
+        self.translator = EventTranslator(ident, on_event=on_event, verbosity=verbosity)
         self._stats: dict[str, dict[str, int]] = {}
 
     def _handle_ftl2_event(self, event: dict[str, Any]) -> None:
@@ -81,6 +83,8 @@ class RunnerContext:
                     self._stats[host]["changed"] += 1
             else:
                 self._stats[host]["failed"] += 1
+                # FTL2 continues past failures (like ignore_errors: true)
+                self._stats[host]["ignored"] += 1
 
     @asynccontextmanager
     async def automation(self, **kwargs):

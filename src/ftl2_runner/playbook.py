@@ -122,7 +122,7 @@ async def run_playbook(
         sys.stdout.flush()
 
     # Create runner context
-    runner = RunnerContext(ident="1", on_event=on_event)
+    runner = RunnerContext(ident="1", on_event=on_event, verbosity=verbosity)
 
     try:
         result = await run_func(inventory, extra_vars, runner)
