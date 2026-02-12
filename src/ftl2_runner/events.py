@@ -1,5 +1,6 @@
 """Event translation from FTL2 to ansible-runner format."""
 
+import base64
 import json
 import uuid
 from datetime import datetime, timezone
@@ -340,6 +341,30 @@ def create_playbook_stats_event(
             "stats": stats,
         },
     }
+
+
+def encode_event_ansi(event_data: dict[str, Any], max_width: int = 78) -> str:
+    """Encode event data as ANSI escape sequence for OutputEventFilter extraction.
+
+    Matches the format from ansible-runner's awx_display callback plugin.
+    The cursor-backward codes make the encoded data invisible on terminals.
+
+    Args:
+        event_data: Event dict to encode (event, uuid, created, event_data, etc.)
+        max_width: Max width of base64 chunks (default 78, matches awx_display)
+
+    Returns:
+        ANSI-encoded string to write to stdout
+    """
+    b64data = base64.b64encode(
+        json.dumps(event_data, default=str).encode("utf-8")
+    ).decode()
+    parts = ["\x1b[K"]
+    for offset in range(0, len(b64data), max_width):
+        chunk = b64data[offset:offset + max_width]
+        parts.append(f"{chunk}\x1b[{len(chunk)}D")
+    parts.append("\x1b[K")
+    return "".join(parts)
 
 
 def event_to_json(event: dict[str, Any]) -> str:

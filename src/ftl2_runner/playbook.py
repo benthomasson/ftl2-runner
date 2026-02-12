@@ -12,10 +12,12 @@ Usage:
 import argparse
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
 
+from ftl2_runner.events import encode_event_ansi
 from ftl2_runner.runner_context import RunnerContext
 from ftl2_runner.worker import load_baked_script
 
@@ -87,29 +89,44 @@ async def run_playbook(
         print(f"ERROR: Could not load script from {playbook_path}", file=sys.stderr)
         return 1
 
-    # Create a simple event handler that prints to stdout
+    # Event handler that encodes events as ANSI escape sequences.
+    # AWX's OutputEventFilter extracts these to build structured job events.
+    # On terminals, the cursor-backward codes make the encoding invisible.
     def on_event(event: dict[str, Any]) -> None:
-        event_type = event.get("event", "")
-        event_data = event.get("event_data", {})
-        host = event_data.get("host", "localhost")
-        task = event_data.get("task", "")
-        res = event_data.get("res", {})
+        # Build event dict for ANSI encoding (same fields as awx_display get_begin_dict)
+        encoded: dict[str, Any] = {
+            "event": event.get("event", "verbose"),
+            "uuid": event.get("uuid"),
+            "created": event.get("created"),
+            "event_data": event.get("event_data", {}),
+            "pid": os.getpid(),
+        }
+        if event.get("parent_uuid"):
+            encoded["parent_uuid"] = event["parent_uuid"]
+        job_id = os.environ.get("JOB_ID", "")
+        if job_id:
+            encoded["job_id"] = int(job_id)
 
-        if event_type == "runner_on_ok":
-            changed = res.get("changed", False)
-            status = "CHANGED" if changed else "SUCCESS"
-            print(f"{host} | {status} => {json.dumps(res, indent=2, default=str)}")
-        elif event_type == "runner_on_failed":
-            print(f"{host} | FAILED! => {json.dumps(res, indent=2, default=str)}", file=sys.stderr)
-        elif event_type == "runner_on_start":
-            if verbosity > 0:
-                print(f"\nTASK [{task}] " + "*" * 40)
+        # Write ANSI begin marker
+        sys.stdout.write(encode_event_ansi(encoded))
+
+        # Write visible stdout text (becomes event's stdout via OutputEventFilter)
+        stdout_text = event.get("stdout", "")
+        if stdout_text:
+            sys.stdout.write(stdout_text)
+            if not stdout_text.endswith("\n"):
+                sys.stdout.write("\n")
+
+        # Write ANSI end marker (same data, matches awx_display pattern)
+        sys.stdout.write(encode_event_ansi(encoded))
+        sys.stdout.flush()
 
     # Create runner context
     runner = RunnerContext(ident="1", on_event=on_event)
 
     try:
         result = await run_func(inventory, extra_vars, runner)
+        runner.emit_stats()
         return result if isinstance(result, int) else 0
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
