@@ -70,7 +70,10 @@ class RunnerContext:
         if event.get("event") == "module_complete":
             host = event.get("host", "localhost")
             if host not in self._stats:
-                self._stats[host] = {"ok": 0, "changed": 0, "failed": 0, "skipped": 0}
+                self._stats[host] = {
+                    "ok": 0, "changed": 0, "failed": 0,
+                    "skipped": 0, "rescued": 0, "ignored": 0,
+                }
 
             if event.get("success"):
                 self._stats[host]["ok"] += 1

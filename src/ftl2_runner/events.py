@@ -89,6 +89,13 @@ class EventTranslator:
 
         return ""
 
+    def _colorize_stat(self, label: str, value: int, color: str) -> str:
+        """Colorize a stat field if non-zero, plain if zero."""
+        text = f"{label}={value:<4}"
+        if value:
+            return f"{color}{text}{self._COLOR_RESET}"
+        return text
+
     def _format_stats_stdout(self, per_host_stats: dict[str, dict[str, int]]) -> str:
         """Format PLAY RECAP stdout for stats event."""
         lines = ["\nPLAY RECAP " + "*" * 65]
@@ -98,21 +105,36 @@ class EventTranslator:
             unreachable = counts.get("unreachable", 0)
             failed = counts.get("failed", 0)
             skipped = counts.get("skipped", 0)
-            # Color the host line based on status (same logic as Ansible)
+            rescued = counts.get("rescued", 0)
+            ignored = counts.get("ignored", 0)
+            # Color host name based on worst status (same logic as Ansible)
             if failed:
-                color = self._COLOR_FAILED
+                host_color = self._COLOR_FAILED
             elif unreachable:
-                color = self._COLOR_UNREACHABLE
+                host_color = self._COLOR_UNREACHABLE
             elif changed:
-                color = self._COLOR_CHANGED
+                host_color = self._COLOR_CHANGED
             else:
-                color = self._COLOR_OK
-            line = (
-                f"{color}{host:<26}: ok={ok:<4} changed={changed:<4} "
-                f"unreachable={unreachable:<4} failed={failed:<4} "
-                f"skipped={skipped:<4}{self._COLOR_RESET}"
-            )
-            lines.append(line)
+                host_color = self._COLOR_OK
+            parts = [
+                f"{host_color}{host}{self._COLOR_RESET}",
+                " " * max(1, 26 - len(host)),
+                ": ",
+                self._colorize_stat("ok", ok, self._COLOR_OK),
+                " ",
+                self._colorize_stat("changed", changed, self._COLOR_CHANGED),
+                " ",
+                self._colorize_stat("unreachable", unreachable, self._COLOR_UNREACHABLE),
+                " ",
+                self._colorize_stat("failed", failed, self._COLOR_FAILED),
+                " ",
+                self._colorize_stat("skipped", skipped, self._COLOR_SKIP),
+                " ",
+                self._colorize_stat("rescued", rescued, self._COLOR_OK),
+                " ",
+                self._colorize_stat("ignored", ignored, self._COLOR_SKIP),
+            ]
+            lines.append("".join(parts))
         return "\n".join(lines)
 
     def translate(self, ftl2_event: dict[str, Any]) -> dict[str, Any]:
@@ -263,6 +285,8 @@ class EventTranslator:
             "failures": {},
             "dark": {},
             "skipped": {},
+            "rescued": {},
+            "ignored": {},
         }
         for host, counts in per_host_stats.items():
             for host_key, awx_key in [
@@ -270,6 +294,8 @@ class EventTranslator:
                 ("changed", "changed"),
                 ("failed", "failures"),
                 ("skipped", "skipped"),
+                ("rescued", "rescued"),
+                ("ignored", "ignored"),
             ]:
                 count = counts.get(host_key, 0)
                 if count:

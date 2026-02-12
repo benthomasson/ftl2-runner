@@ -236,7 +236,7 @@ sys.exit(rc)
         assert len(stats_events) == 1, "Expected exactly one playbook_on_stats event"
         stats_data = stats_events[0]["event_data"]
         # AWX expects per-status keys, not per-host
-        for key in ("ok", "changed", "failures", "dark", "skipped"):
+        for key in ("ok", "changed", "failures", "dark", "skipped", "rescued", "ignored"):
             assert key in stats_data, f"Stats missing AWX key '{key}'"
         # Should NOT have the old per-host "stats" key
         assert "stats" not in stats_data, "Stats should not have old 'stats' key"
