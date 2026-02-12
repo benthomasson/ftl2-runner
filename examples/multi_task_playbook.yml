@@ -1,0 +1,12 @@
+hosts: all  # noqa - satisfies AWX playbook discovery regex
+
+
+async def run(inventory_path, extravars, runner):
+    """FTL2 script with multiple tasks."""
+    async with runner.automation() as ftl:
+        await ftl.ping()
+        await ftl.command(cmd="echo hello world")
+        await ftl.command(cmd="uname -a")
+        await ftl.command(cmd="/bin/false")
+        await ftl.file(path="/tmp/ftl2-test", state="directory")
+    return 0

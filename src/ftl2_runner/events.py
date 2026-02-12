@@ -48,6 +48,14 @@ class EventTranslator:
         event["end_line"] = self._line + n_lines
         self._line += n_lines
 
+    # ANSI color codes matching Ansible's defaults
+    _COLOR_OK = "\033[0;32m"
+    _COLOR_CHANGED = "\033[0;33m"
+    _COLOR_FAILED = "\033[0;31m"
+    _COLOR_SKIP = "\033[0;36m"
+    _COLOR_UNREACHABLE = "\033[0;91m"
+    _COLOR_RESET = "\033[0m"
+
     def _format_stdout(self, event: dict[str, Any]) -> str:
         """Format stdout text for an event, mimicking Ansible output."""
         event_type = event.get("event", "")
@@ -55,15 +63,19 @@ class EventTranslator:
 
         if event_type == "runner_on_ok":
             host = event_data.get("host", "localhost")
-            res = event_data.get("res", {})
             changed = event_data.get("changed", False)
-            prefix = "changed" if changed else "ok"
-            return f"{prefix}: [{host}] => {json.dumps(res, indent=4, default=str)}"
+            if changed:
+                color = self._COLOR_CHANGED
+                prefix = "changed"
+            else:
+                color = self._COLOR_OK
+                prefix = "ok"
+            return f"{color}{prefix}: [{host}]{self._COLOR_RESET}"
 
         elif event_type == "runner_on_failed":
             host = event_data.get("host", "localhost")
             res = event_data.get("res", {})
-            return f"fatal: [{host}]: FAILED! => {json.dumps(res, indent=4, default=str)}"
+            return f"{self._COLOR_FAILED}fatal: [{host}]: FAILED! => {json.dumps(res, indent=4, default=str)}{self._COLOR_RESET}"
 
         elif event_type == "playbook_on_play_start":
             play_name = event_data.get("play", {}).get("name", "")
@@ -86,10 +98,19 @@ class EventTranslator:
             unreachable = counts.get("unreachable", 0)
             failed = counts.get("failed", 0)
             skipped = counts.get("skipped", 0)
+            # Color the host line based on status (same logic as Ansible)
+            if failed:
+                color = self._COLOR_FAILED
+            elif unreachable:
+                color = self._COLOR_UNREACHABLE
+            elif changed:
+                color = self._COLOR_CHANGED
+            else:
+                color = self._COLOR_OK
             line = (
-                f"{host:<26}: ok={ok:<4} changed={changed:<4} "
+                f"{color}{host:<26}: ok={ok:<4} changed={changed:<4} "
                 f"unreachable={unreachable:<4} failed={failed:<4} "
-                f"skipped={skipped:<4}"
+                f"skipped={skipped:<4}{self._COLOR_RESET}"
             )
             lines.append(line)
         return "\n".join(lines)
