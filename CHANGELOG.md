@@ -2,6 +2,21 @@
 
 All notable changes to ftl2-runner are documented in this file.
 
+## [0.5.0] - 2026-02-12
+
+### Added
+- ANSI event encoding for AWX container mode, matching ansible-runner's `awx_display` callback plugin format
+- Event hierarchy: `playbook_on_start`, `playbook_on_play_start`, `playbook_on_task_start` events with `parent_uuid` chain
+- `stdout`, `start_line`, `end_line` fields on all events for AWX job output reconstruction
+- AWX-compatible `playbook_on_stats` event with transposed per-status format (`ok`, `changed`, `failures`, `dark`, `skipped`)
+- Colored output matching Ansible defaults: green for ok, yellow for changed, red for failed
+- Concise task output at default verbosity (hide result JSON, matching Ansible behavior)
+- `RunnerContext.has_failures()` method to check for failed tasks
+
+### Changed
+- Job exit code is now 2 when tasks fail but script returns 0, matching Ansible convention
+- FTL2's own SUMMARY output suppressed in favor of PLAY RECAP event (`quiet=True`)
+
 ## [0.4.0] - 2026-02-11
 
 ### Added
