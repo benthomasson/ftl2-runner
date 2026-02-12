@@ -106,6 +106,7 @@ class RunnerContext:
         event = self.translator.create_play_start_event()
         self.on_event(event)
 
+        kwargs.setdefault("quiet", True)
         async with automation(on_event=self._handle_ftl2_event, **kwargs) as ftl:
             yield ftl
 
