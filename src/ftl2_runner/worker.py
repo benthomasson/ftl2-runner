@@ -18,11 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from ftl2_runner.events import (
-    EventTranslator,
-    create_playbook_stats_event,
-    create_status_event,
-)
+from ftl2_runner.events import create_status_event
 from ftl2_runner.runner_context import RunnerContext
 from ftl2_runner.streaming import (
     read_input_stream,
@@ -217,14 +213,6 @@ def run_worker(
     artifact_writer = ArtifactWriter(artifact_dir, ident)
     artifact_writer.setup()
 
-    # Event counter for status events
-    event_counter = 0
-
-    def next_counter() -> int:
-        nonlocal event_counter
-        event_counter += 1
-        return event_counter
-
     # Send starting status
     write_status(stdout, "starting")
 
@@ -267,7 +255,7 @@ def run_worker(
         status = "failed"
 
     # Write stats event (RunnerContext tracks stats from FTL2 events)
-    stats_event = create_playbook_stats_event(ident, next_counter(), runner._stats)
+    stats_event = runner.translator.create_stats_event(runner._stats)
     write_event(stdout, stats_event)
     artifact_writer.write_event(stats_event)
 

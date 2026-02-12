@@ -28,11 +28,70 @@ class EventTranslator:
         self.ident = ident
         self.on_event = on_event
         self._counter = 0
+        self._line = 0
+        self._playbook_uuid: str | None = None
+        self._play_uuid: str | None = None
+        self._task_uuid: str | None = None
 
     def _next_counter(self) -> int:
         """Get next event counter."""
         self._counter += 1
         return self._counter
+
+    def _add_stdout_fields(self, event: dict[str, Any]) -> None:
+        """Add stdout, start_line, end_line to an event."""
+        stdout = self._format_stdout(event)
+        n_lines = stdout.count("\n") + (1 if stdout else 0)
+        event["stdout"] = stdout
+        event["start_line"] = self._line
+        event["end_line"] = self._line + n_lines
+        self._line += n_lines
+
+    def _format_stdout(self, event: dict[str, Any]) -> str:
+        """Format stdout text for an event, mimicking Ansible output."""
+        event_type = event.get("event", "")
+        event_data = event.get("event_data", {})
+
+        if event_type == "runner_on_ok":
+            host = event_data.get("host", "localhost")
+            res = event_data.get("res", {})
+            changed = event_data.get("changed", False)
+            prefix = "changed" if changed else "ok"
+            return f"{prefix}: [{host}] => {json.dumps(res, indent=4, default=str)}"
+
+        elif event_type == "runner_on_failed":
+            host = event_data.get("host", "localhost")
+            res = event_data.get("res", {})
+            return f"fatal: [{host}]: FAILED! => {json.dumps(res, indent=4, default=str)}"
+
+        elif event_type == "playbook_on_play_start":
+            play_name = event_data.get("play", {}).get("name", "")
+            header = f"\nPLAY [{play_name}] "
+            return header + "*" * max(0, 76 - len(header))
+
+        elif event_type == "playbook_on_task_start":
+            task_name = event_data.get("task", {}).get("name", "")
+            header = f"\nTASK [{task_name}] "
+            return header + "*" * max(0, 76 - len(header))
+
+        return ""
+
+    def _format_stats_stdout(self, per_host_stats: dict[str, dict[str, int]]) -> str:
+        """Format PLAY RECAP stdout for stats event."""
+        lines = ["\nPLAY RECAP " + "*" * 65]
+        for host, counts in per_host_stats.items():
+            ok = counts.get("ok", 0)
+            changed = counts.get("changed", 0)
+            unreachable = counts.get("unreachable", 0)
+            failed = counts.get("failed", 0)
+            skipped = counts.get("skipped", 0)
+            line = (
+                f"{host:<26}: ok={ok:<4} changed={changed:<4} "
+                f"unreachable={unreachable:<4} failed={failed:<4} "
+                f"skipped={skipped:<4}"
+            )
+            lines.append(line)
+        return "\n".join(lines)
 
     def translate(self, ftl2_event: dict[str, Any]) -> dict[str, Any]:
         """Translate FTL2 event to ansible-runner format.
@@ -85,6 +144,13 @@ class EventTranslator:
                 k: v for k, v in ftl2_event.items() if k != "event"
             }
 
+        # Add parent_uuid for runner events
+        if self._task_uuid and ar_event.get("event", "").startswith("runner_on_"):
+            ar_event["parent_uuid"] = self._task_uuid
+
+        # Add stdout and line tracking
+        self._add_stdout_fields(ar_event)
+
         return ar_event
 
     def __call__(self, ftl2_event: dict[str, Any]) -> None:
@@ -95,6 +161,116 @@ class EventTranslator:
         ar_event = self.translate(ftl2_event)
         if self.on_event:
             self.on_event(ar_event)
+
+    def create_playbook_start_event(self) -> dict[str, Any]:
+        """Create playbook_on_start hierarchy event."""
+        playbook_uuid = str(uuid.uuid4())
+        self._playbook_uuid = playbook_uuid
+        event: dict[str, Any] = {
+            "uuid": playbook_uuid,
+            "counter": self._next_counter(),
+            "created": datetime.now(timezone.utc).isoformat(),
+            "runner_ident": self.ident,
+            "event": "playbook_on_start",
+            "event_data": {
+                "playbook": "ftl2_script",
+                "uuid": playbook_uuid,
+            },
+        }
+        self._add_stdout_fields(event)
+        return event
+
+    def create_play_start_event(self, play_name: str = "FTL2 Script") -> dict[str, Any]:
+        """Create playbook_on_play_start hierarchy event."""
+        play_uuid = str(uuid.uuid4())
+        self._play_uuid = play_uuid
+        event: dict[str, Any] = {
+            "uuid": play_uuid,
+            "counter": self._next_counter(),
+            "created": datetime.now(timezone.utc).isoformat(),
+            "runner_ident": self.ident,
+            "event": "playbook_on_play_start",
+            "event_data": {
+                "play": {
+                    "name": play_name,
+                    "id": play_uuid,
+                },
+            },
+            "parent_uuid": self._playbook_uuid,
+        }
+        self._add_stdout_fields(event)
+        return event
+
+    def create_task_start_event(self, task_name: str, task_action: str) -> dict[str, Any]:
+        """Create playbook_on_task_start hierarchy event."""
+        task_uuid = str(uuid.uuid4())
+        self._task_uuid = task_uuid
+        event: dict[str, Any] = {
+            "uuid": task_uuid,
+            "counter": self._next_counter(),
+            "created": datetime.now(timezone.utc).isoformat(),
+            "runner_ident": self.ident,
+            "event": "playbook_on_task_start",
+            "event_data": {
+                "task": {
+                    "name": task_name,
+                    "id": task_uuid,
+                },
+                "task_action": task_action,
+            },
+            "parent_uuid": self._play_uuid,
+        }
+        self._add_stdout_fields(event)
+        return event
+
+    def create_stats_event(self, per_host_stats: dict[str, dict[str, int]]) -> dict[str, Any]:
+        """Create playbook_on_stats event with AWX-compatible format.
+
+        Transposes per-host stats to per-status format expected by AWX.
+
+        Args:
+            per_host_stats: Dict like {"host1": {"ok": 5, "changed": 2, "failed": 0}}
+
+        Returns:
+            Stats event dict with transposed format
+        """
+        # Transpose from per-host to per-status format
+        transposed: dict[str, dict[str, int]] = {
+            "ok": {},
+            "changed": {},
+            "failures": {},
+            "dark": {},
+            "skipped": {},
+        }
+        for host, counts in per_host_stats.items():
+            for host_key, awx_key in [
+                ("ok", "ok"),
+                ("changed", "changed"),
+                ("failed", "failures"),
+                ("skipped", "skipped"),
+            ]:
+                count = counts.get(host_key, 0)
+                if count:
+                    transposed[awx_key][host] = count
+
+        # Format stdout from original per-host stats
+        stdout = self._format_stats_stdout(per_host_stats)
+        n_lines = stdout.count("\n") + (1 if stdout else 0)
+
+        event: dict[str, Any] = {
+            "uuid": str(uuid.uuid4()),
+            "counter": self._next_counter(),
+            "created": datetime.now(timezone.utc).isoformat(),
+            "runner_ident": self.ident,
+            "event": "playbook_on_stats",
+            "event_data": transposed,
+            "parent_uuid": self._playbook_uuid,
+            "stdout": stdout,
+            "start_line": self._line,
+            "end_line": self._line + n_lines,
+        }
+        self._line += n_lines
+        return event
 
 
 def create_status_event(

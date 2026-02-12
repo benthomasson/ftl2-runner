@@ -4,7 +4,7 @@ This simulates what Receptor/AWX does:
 1. Create a private_data_dir with inventory and extravars
 2. Stream it as a zip to the worker via stdin
 3. Capture the event output from stdout
-4. Verify events are in ansible-runner format
+4. Verify events are in ansible-runner format with AWX-compatible fields
 """
 
 import base64
@@ -186,6 +186,63 @@ sys.exit(rc)
 
         # Check for EOF
         assert any(e.get("eof") for e in events), "Missing EOF marker"
+
+        # Check for hierarchy events
+        hierarchy_events = [e for e in events if e.get("event") in (
+            "playbook_on_start", "playbook_on_play_start", "playbook_on_task_start"
+        )]
+        hierarchy_types = [e["event"] for e in hierarchy_events]
+        assert "playbook_on_start" in hierarchy_types, "Missing playbook_on_start event"
+        assert "playbook_on_play_start" in hierarchy_types, "Missing playbook_on_play_start event"
+        assert "playbook_on_task_start" in hierarchy_types, "Missing playbook_on_task_start event"
+
+        # Verify hierarchy event order
+        pb_start_idx = next(i for i, e in enumerate(events) if e.get("event") == "playbook_on_start")
+        play_start_idx = next(i for i, e in enumerate(events) if e.get("event") == "playbook_on_play_start")
+        task_start_idx = next(i for i, e in enumerate(events) if e.get("event") == "playbook_on_task_start")
+        assert pb_start_idx < play_start_idx < task_start_idx, "Hierarchy events out of order"
+
+        # Check parent_uuid chain
+        pb_start = events[pb_start_idx]
+        play_start = events[play_start_idx]
+        task_start = events[task_start_idx]
+
+        assert play_start.get("parent_uuid") == pb_start["uuid"], \
+            "play_start parent_uuid should match playbook_start uuid"
+        assert task_start.get("parent_uuid") == play_start["uuid"], \
+            "task_start parent_uuid should match play_start uuid"
+
+        # Check runner events have parent_uuid pointing to task
+        runner_events = [e for e in events if e.get("event", "").startswith("runner_on_")]
+        for re in runner_events:
+            assert re.get("parent_uuid") == task_start["uuid"], \
+                f"runner event {re['event']} parent_uuid should match task_start uuid"
+
+        # Check all events have stdout, start_line, end_line fields
+        event_events = [e for e in events if "event" in e and e.get("event") != "status"]
+        for ev in event_events:
+            assert "stdout" in ev, f"Event {ev.get('event')} missing 'stdout' field"
+            assert "start_line" in ev, f"Event {ev.get('event')} missing 'start_line' field"
+            assert "end_line" in ev, f"Event {ev.get('event')} missing 'end_line' field"
+
+        # Check start_line/end_line are monotonically increasing
+        lines = [(ev["start_line"], ev["end_line"]) for ev in event_events]
+        for i in range(1, len(lines)):
+            assert lines[i][0] >= lines[i-1][1], \
+                f"Line numbers not monotonic: event {i} starts at {lines[i][0]} but previous ends at {lines[i-1][1]}"
+
+        # Check playbook_on_stats has AWX-compatible format
+        stats_events = [e for e in events if e.get("event") == "playbook_on_stats"]
+        assert len(stats_events) == 1, "Expected exactly one playbook_on_stats event"
+        stats_data = stats_events[0]["event_data"]
+        # AWX expects per-status keys, not per-host
+        for key in ("ok", "changed", "failures", "dark", "skipped"):
+            assert key in stats_data, f"Stats missing AWX key '{key}'"
+        # Should NOT have the old per-host "stats" key
+        assert "stats" not in stats_data, "Stats should not have old 'stats' key"
+
+        # Stats stdout should contain PLAY RECAP
+        assert "PLAY RECAP" in stats_events[0].get("stdout", ""), "Stats stdout missing PLAY RECAP"
 
         print("\n=== TEST PASSED ===")
 

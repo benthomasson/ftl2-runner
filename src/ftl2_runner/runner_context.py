@@ -9,8 +9,7 @@ from typing import Any, BinaryIO, Callable
 
 from ftl2 import automation
 
-from ftl2_runner.events import EventTranslator, create_playbook_stats_event
-from ftl2_runner.streaming import write_event
+from ftl2_runner.events import EventTranslator
 
 
 class RunnerContext:
@@ -51,18 +50,19 @@ class RunnerContext:
         self.stream = stream
         self.translator = EventTranslator(ident, on_event=on_event)
         self._stats: dict[str, dict[str, int]] = {}
-        self._event_counter = 0
-
-    def _next_counter(self) -> int:
-        """Get next event counter."""
-        self._event_counter += 1
-        return self._event_counter
 
     def _handle_ftl2_event(self, event: dict[str, Any]) -> None:
         """Handle event from FTL2 automation context.
 
         Translates FTL2 events to ansible-runner format and updates stats.
+        Emits playbook_on_task_start before each module_start event.
         """
+        # Emit task start before runner_on_start
+        if event.get("event") == "module_start":
+            module_name = event.get("module", "unknown")
+            task_event = self.translator.create_task_start_event(module_name, module_name)
+            self.on_event(task_event)
+
         # Translate and forward the event
         self.translator(event)
 
@@ -83,7 +83,8 @@ class RunnerContext:
     async def automation(self, **kwargs):
         """Create FTL2 automation context with event streaming.
 
-        Events are automatically translated to ansible-runner format.
+        Emits playbook hierarchy events (playbook_on_start, playbook_on_play_start)
+        and translates FTL2 module events to ansible-runner format.
 
         Args:
             **kwargs: Passed to ftl2.automation()
@@ -96,17 +97,22 @@ class RunnerContext:
         Yields:
             FTL2 AutomationContext
         """
+        # Emit playbook_on_start once
+        if not self.translator._playbook_uuid:
+            event = self.translator.create_playbook_start_event()
+            self.on_event(event)
+
+        # Emit playbook_on_play_start for each automation block
+        event = self.translator.create_play_start_event()
+        self.on_event(event)
+
         async with automation(on_event=self._handle_ftl2_event, **kwargs) as ftl:
             yield ftl
 
     def emit_stats(self) -> None:
         """Emit playbook_on_stats event with collected statistics."""
         if self._stats:
-            stats_event = create_playbook_stats_event(
-                self.ident,
-                self._next_counter(),
-                self._stats,
-            )
+            stats_event = self.translator.create_stats_event(self._stats)
             self.on_event(stats_event)
 
     def emit_event(self, event: dict[str, Any]) -> None:
